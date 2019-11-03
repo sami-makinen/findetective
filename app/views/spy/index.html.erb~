@@ -1,0 +1,14 @@
+<h1>Findetective</h1>
+
+<h2>Finnish</h2>
+
+<% @finnish.each {|s| %>
+<p><%= s %></p>
+<% } %>
+
+
+<h2>Bullshits</h2>
+
+<% @bullshits.each {|s| %>
+<p><%= s %></p>
+<% } %>

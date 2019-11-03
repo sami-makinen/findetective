@@ -1,0 +1,12 @@
+namespace :spy do
+  desc "Build dictionary file from sources."
+  task :builddict do
+    Spy::build_dictionary
+  end
+
+  desc "Build language detector model."
+  task :buildmodel do
+    Spy::build_model
+  end
+end
+
