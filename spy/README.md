@@ -56,6 +56,7 @@ Tromp, Erik & Pechenizkiy, Mykola. (2011). Graph-Based N-gram Language Identific
 Panich, Leonid, Stefan Conrad and Martin Mauve. “Comparison of Language Identification Techniques.” (2015).
 https://github.com/rest-client/rest-client
 https://ruby-doc.org/core-2.6.5/String.html
+http://www.kielitoimistonohjepankki.fi/haku/tavutus/ohje/153
 
 ## License
 The gem is available as open source under the terms of the [MIT License](https://opensource.org/licenses/MIT).

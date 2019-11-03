@@ -13,3 +13,6 @@ gemspec
 
 # To use a debugger
 # gem 'byebug', group: [:development, :test]
+gem 'rest-client'
+#gem 'pg', '>= 0.18', '< 2.0'
+gem 'sqlite3'

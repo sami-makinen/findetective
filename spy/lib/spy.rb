@@ -5,30 +5,54 @@ require 'rexml/document'
 require 'json'
 require 'rest-client'
 require 'singleton'
-
+load 'true-positive.rb'
 module Spy
   FinnWordNetUrl='https://korp.csc.fi/download/FinnWordNet/v2.0/FinnWordNet-2.0.zip'
-  
+  DetectorModelName='fi-detector.model'  
   QuadVowels= ("[" + String::Vowels + "]") * 4
   QuadConsonants=("[^ ." + String::Vowels + "]") * 4
   DictionaryFile='sanasto.txt'
 
   class TrieNode
+    def code
+      @code
+    end
+
+    def code=(value)
+      @code = value
+    end
+    
     def children
       @children
     end
+
+    def find(code)
+      children.each {|n| return n if code == n.code}
+      return nil
+    end
+
+    def insert(node)
+      children << node
+    end
     
-    def initialize
-      @children = [nil] * String::Alphabet.length
+    def initialize(code)
+      @code = code
+      @children = [] # * String::Alphabet.length
     end
   end
   
   class Trie
+
+    def newnode(code)
+      @nodecount = @nodecount + 1
+      TrieNode.new(code)
+    end
     
     def load(filename)
       File.foreach(filename) {|line|
         insert(line.strip)
       }
+      Rails.logger.debug "Trie node count: " + @nodecount.to_s + "\n"
     end
     
     def save(filename)
@@ -48,17 +72,18 @@ module Spy
       while not node.nil?
         found=false
         pos.upto(String::Alphabet.length-1) {|i|
-          next if node.children[i].nil?
+          n = node.find(i)
+          next if n.nil? 
           found=true
           stack.push([i, node])
-          node = node.children[i]
+          node = n # node.children[i]
           pos = 0
           break
         }
         
         next if found
         
-        yield(stack.map{|e| String::Characters[e.first]}.join) unless node.children[String::Alphabet.length].nil?
+        yield(stack.map{|e| String::Characters[e.first]}.join) if node.find('$') # node.children[String::Alphabet.length].nil?
         
         if stack.empty?
           node = nil
@@ -73,9 +98,15 @@ module Spy
     def wordcount
       @wordcount
     end
+
+    def endnode
+      @endnode
+    end
     
     def initialize
-      @root = TrieNode.new
+      @endnode = TrieNode.new('$')
+      @nodecount = 0
+      @root = TrieNode.new('^')
       @wordcount = 0
     end
     
@@ -85,6 +116,7 @@ module Spy
     
     def insert(word)
       return if word.nil? || word.empty?
+
       node = root
       word.chars.each{|ch|
         
@@ -95,17 +127,20 @@ module Spy
         i = String::Characters.index(ch)
         return if i.nil?
         #   print "debug trie: insert " + ch + " (" + i.to_s + ")\n" if word == 'kunnalle'
-        chnode = node.children[i]
+        chnode = node.find(i) # node.children[i]
         if chnode.nil?
-          chnode = TrieNode.new
-          node.children[i] = chnode
+          chnode = newnode(i)
+          #node.children[i] = chnode
+          node.insert(chnode) # = chnode
         end
         node = chnode
       }
       
-      # mark end of word with pointer to root
-      if node.children[String::Characters.length].nil?
-        node.children[String::Characters.length] = root
+      # mark end of word
+      if node.find(endnode.code).nil? # node.children[String::Characters.length].nil?
+        # node.children[String::Characters.length] = root
+        node.insert(endnode)
+        #node[String::Characters.length] = root
         @wordcount = @wordcount + 1
       end
     end
@@ -121,14 +156,14 @@ module Spy
         i = String::Characters.index(ch)
         return false if i.nil?
         #      print "debug trie: lookup " + ch + " (" + i.to_s + ")\n"
-        chnode = node.children[i]
+        chnode = node.find(i)  # node.children[i]
         #      print "debug chnode: " + chnode.to_s + "\n"
         return false if chnode.nil?
         node = chnode
       }
       # check if word may end also
       #   print "word ending: " + node.children[Characters.length].to_s + "\n"
-      return false if node.children[String::Characters.length].nil?
+      return false if node.find(endnode.code).nil? # node.children[String::Characters.length].nil?
       return true
     end
     
@@ -166,7 +201,7 @@ module Spy
       File.foreach(filename){|line|
         next unless line.start_with?(re)
         word=line.partition(/ /)[0]
-        word.tr('_', ' ')
+        yield(word.tr('_', ' '))
       }
     end
   end
@@ -442,7 +477,7 @@ module Spy
     end
 
     def train(lang, corpus)
-      @languages << lang
+      @languages << lang unless @languages.include?(lang)
       corpus.each_sentence { |s|
         prev = nil
         node = nil
@@ -481,7 +516,7 @@ module Spy
           end
         }
       }
-      print "trigrams: " + trigramcount.to_s + " visits: " + visits.to_s + " transitions: " + transitioncount.to_s + "\n"
+      Rails.logger.debug "trigrams: " + trigramcount.to_s + " visits: " + visits.to_s + " transitions: " + transitioncount.to_s + "\n"
     end
     
     def confidence(text)
@@ -554,7 +589,7 @@ module Spy
     def load(filename)
       File.foreach(filename + ".meta") {|l|
         meta = eval(l)
-        print "META: " + meta.to_s + "\n"
+        Rails.logger.debug "META: " + meta.to_s + "\n"
         @languages = meta[:languages]
         @trigramcount = meta[:nodecount]
         @visits = meta[:visits]
@@ -630,17 +665,19 @@ module Spy
     end
     
     def initialize()
-      @minthreshold=0.2
+      @minthreshold=1.0
     end
 
     def loadall
-      print "Loading dictionary\n"
+      return unless @trie.nil?
+      
+      Rails.logger.debug "Loading dictionary\n"
       @trie = Trie.new
       @trie.load(DictionaryFile)
       
-      print "Loading detector\n"
+      Rails.logger.debug "Loading detector\n"
       @detector=LanguageDetector.new
-      detector.load('fi-et-detector.model')
+      detector.load(DetectorModelName)
     end
     
     def nonsense?(sentence)
@@ -667,36 +704,36 @@ module Spy
       found=0
       wc=0
       Caesar.each_guess(encrypted) { |decrypted|
-        print "DEBUG: " + decrypted + "\n"
+        Rails.logger.debug "Decrypted: " + decrypted + "\n"
 
         hc = trie.hitcount(decrypted)
-        print "dictionary check: " + hc.to_s + "\n"
+        Rails.logger.debug "dictionary check: " + hc.to_s + "\n"
 
-        if hc[:found] == 0
-          print "dropped sentence, no finnish words found: '" + decrypted + "'\n"
-          next
-        end
+        #if hc[:found] == 0
+        #  Rails.logger.debug "dropped sentence, no finnish words found: '" + decrypted + "'\n"
+        #  next
+        #end
 
         # make brutal check before accepting
         if nonsense?(decrypted)
-          print "dropped candidate due brutal check: '" + decrypted + "'\n"
+          Rails.logger.debug "dropped candidate due brutal check: '" + decrypted + "'\n"
           next
         end
 
         confidences=detector.confidence(decrypted)
-        print "confidence: " + confidences['fi'].to_s + "\n"
+        Rails.logger.debug "confidence: " + confidences['fi'].to_s + "\n"
 
-        if( confidences['fi'] < confidences['et'] )
-          print "more likely estonian: '" + decrypted + "'\n"
-          next
-        end
+        #if( confidences['fi'] < confidences['et'] )
+        #  print "more likely estonian: '" + decrypted + "'\n"
+        #  next
+        #end
 
         if confidences['fi'] < minthreshold
-          print "probably not finnish: '" + decrypted + "'\n"
+          Rails.logger.debug "probably not finnish: '" + decrypted + "'\n"
           if hc[:found].to_f/hc[:wc].to_f > 0.5
-            print "wierd, high finnish word count while detected as non-finnish\n"
+            Rails.logger.debug "wierd, high finnish word count while detected as non-finnish\n"
             hitsconfidence=detector.confidence(hc[:hits].join(' '))
-            print "hits confidence: " + hitsconfidence.to_s + "\n"        
+            Rails.logger.debug "hits confidence: " + hitsconfidence.to_s + "\n"        
           end
           next
         end
@@ -709,11 +746,11 @@ module Spy
         end
 
         if confidences['fi'] < best
-          print "probably worse hit than current best: '" + decrypted + "'\n"
+          Rails.logger.debug "probably worse hit than current best: '" + decrypted + "'\n"
           next
         end
 
-        if hc[:found] < 3
+        if hc[:found] < 2 && confidences['fi'] < 2.0
           print "dropped candidate after dictionary lookup: "
           print hc.to_s + " confidence: " + confidences['fi'].to_s
           print "'" + decrypted + "'\n"
@@ -722,10 +759,10 @@ module Spy
 
         mc=detector.confidence(hc[:missed].join(' '))
         if hc[:found] != hc[:wc] && confidences['fi'] < 1.0 && mc['fi'] < minthreshold
-          print "dropped candidate after dictionary lookup: "
-          print hc.to_s + " confidence on missed: " + mc['fi'].to_s
-          print " confidence on sentence: " + confidences['fi'].to_s
-          print " '" + decrypted + "'\n"            
+          Rails.logger.debug "dropped candidate after dictionary lookup: "
+          Rails.logger.debug hc.to_s + " confidence on missed: " + mc['fi'].to_s
+          Rails.logger.debug " confidence on sentence: " + confidences['fi'].to_s
+          Rails.logger.debug " '" + decrypted + "'\n"            
         else
           maybefinnish<< {:sentence => decrypted, :confidence => confidences['fi'], :wc => hc[:wc], :found => hc[:found] }
         end
@@ -747,7 +784,6 @@ module Spy
     end
     
     def run
-      #print "Run spy\n"
       data=fetch_encrypted
       bullshits=[]
       finnish=[]
@@ -759,77 +795,37 @@ module Spy
           bullshits << discovery[:sentence]
         end
       }
-      [finnish, bullshits]
-      #total = bullshits.length + finnish.length
-      #hits = {}
-      #TruePositive.each {|s| hits[s]=0 }
+      total = bullshits.length + finnish.length
+      hits = {}
+      TruePositive.each {|s| hits[s]=0 }
       
-      #print "Finnish sentences (" + finnish.length.to_s + "/" + total.to_s + "):\n"
-      #finnish.each {|s|
-        # if hits[s[:sentence]]
-        #   hits[s[:sentence]] = 1 # true positive
-        # else
-        #   hits[s[:sentence]] = -1 # false positive
-        # end
-        
-      #  print s
-      #  print "\n"
-      #}
+      Rails.logger.debug "Finnish sentences (" + finnish.length.to_s + "/" + total.to_s + "):\n"
+      minconfidence = 1000.0
+      finnish.each {|s|
+         if hits[s[:sentence]]
+           hits[s[:sentence]] = 1 # true positive
+         else
+           hits[s[:sentence]] = -1 # false positive
+         end
+         Rails.logger.debug s.to_s + "\n"
+         minconfidence = s[:confidence] if minconfidence > s[:confidence]
+      }
 
-      # print "Bullshit sentences (" + bullshits.length.to_s + "/" + total.to_s + "):\n"
+      Rails.logger.debug "Bullshit sentences (" + bullshits.length.to_s + "/" + total.to_s + "):\n"
       # bullshits.each {|s|
-      #   print s + "\n"
+      #   Rails.logger.debug s + "\n"
       # }
+      Rails.logger.debug "Min FI confidence: " + minconfidence.to_s + "\n"
+      Rails.logger.debug "True positive: " + hits.values.select{|v| v > 0}.length.to_s + "\n"
+      Rails.logger.debug "False positive: " + hits.values.select{|v| v < 0}.length.to_s + "\n"
+      Rails.logger.debug "False negative: " + hits.values.select{|v| v == 0}.length.to_s + "\n"
+      Rails.logger.debug "True negative: " + (bullshits.length - hits.values.select{|v| v == 0}.length).to_s + "\n"
+      Rails.logger.debug "False positive sentences:\n"
+      hits.each_pair{|k,v| Rails.logger.debug k.to_s + "\n" if v < 0}
+      Rails.logger.debug "False negative sentences:\n"
+      hits.each_pair{|k,v| Rails.logger.debug k.to_s + "\n" if v == 0}
 
-      # print "True positive: " + hits.values.select{|v| v > 0}.length.to_s + "\n"
-      # print "False positive: " + hits.values.select{|v| v < 0}.length.to_s + "\n"
-      # print "False negative: " + hits.values.select{|v| v == 0}.length.to_s + "\n"
-      # print "True negative: " + (bullshits.length - hits.values.select{|v| v == 0}.length).to_s + "\n"
-      # print "False positive sentences:\n"
-      # hits.each_pair{|k,v| print k.to_s + "\n" if v < 0}
-      # print "False negative sentences:\n"
-      # hits.each_pair{|k,v| print k.to_s + "\n" if v == 0}
-    end
-
-    def build_model(ficorpuspath, etcorpuspath)
-      detector=LanguageDetector.new
-      detector.train('fi', OneLinerCorpus.new(ficorpuspath))
-      detector.train('et', OneLinerCorpus.new(etcorpuspath))
-      detector.train('fi', OneLinerCorpus.new(DictionaryFile))
-      detector.save('fi-et-detector.model')
-    end
-    
-    def build_dictionary(fwnpath, ftbpath) 
-      trie = Trie.new
-      index=FinnWordNetIndex.new(fwnpath + '/dict/index.adj')
-      index.each_word{|word|
-        trie.insert(word)
-      }
-      FinnWordNetIndex.new(fwnpath + '/dict/index.adv')
-      index.each_word{|word|
-        trie.insert(word)
-      }
-      FinnWordNetIndex.new(fwnpath + '/dict/index.noun')
-      index.each_word{|word|
-        trie.insert(word)
-      }
-      FinnWordNetIndex.new(fwnpath + '/dict/index.verb')
-      index.each_word{|word|
-        trie.insert(word)
-      }
-    
-      corpus=CONLLXCorpus.new(ftbpath, trie)
-      corpus.each_token {|t|
-        
-        if ["Num", "Punct", "Interj", "Abbr"].include?(t[:cpostag]) || t[:head] == 'Abbr'
-          next
-        end
-        
-        trie.insert(t[:form])
-        trie.insert(t[:lemma])
-      }
-      
-      trie.save(DictionaryFile)
+      [finnish, bullshits]
     end
   end
 end
