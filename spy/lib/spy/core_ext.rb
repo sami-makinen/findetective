@@ -7,6 +7,13 @@ class String
   Consonants="bcdfghjklmnpqrstvwxz"
   Diphtongs="ai ei oi äi öi ey äy öy au eu ou ui yi iu iy ie uo yö"
   Punctuation='.,?!:;_-'
+  QuadVowels= ("[" + String::Vowels + "]") * 4
+  QuintConsonants=("[^ ." + String::Vowels + "]") * 5
+
+  ConsonantsArray=Consonants.chars
+  VowelsArray=Vowels.chars
+  DiphtongsArray=Diphtongs.split(' ')
+  VowelsRE=Regexp.new('[' + Vowels + ']')
   
   def word_count
     self.split(' ').length
@@ -21,18 +28,18 @@ class String
   end
   
   def each_syllable
-    
-    c = Consonants.chars
-    v = Vowels.chars
-    d = Diphtongs.split(' ')
-    
+    # known bugs: instrumenttia -> inst-ru-ment-ti-a
+    c = ConsonantsArray
+    v = VowelsArray
+    d = DiphtongsArray
+
     stripped = tr(Punctuation, ' ')
     stripped.each_word { |word|
       if(word.length <= 2)
         yield(word)
         next
       end
-      #      print "debug: each_syllable: word = " + word + "\n"
+
       syllables = []
       r = word.reverse
       syllable = ''
@@ -41,7 +48,6 @@ class String
         # if last is a or ä and next is different vowel, then a or ä is syllable
         if ['a', 'ä'].include?(r[pos]) && r[pos] != r[pos+1] && v.include?(r[pos+1])
           syllable = r[pos] + syllable
-          #          print "debug: a or ä syllable = " + syllable + " pos = " + r[pos] + " cur: " + cur.to_s + "\n"
           syllables.push(syllable)
           syllable = ''
           cur = :none
@@ -55,7 +61,6 @@ class String
             cur=:consonant
           end
           syllable = r[pos] + syllable
-          #          print "debug: syllable = " + syllable + " pos = " + r[pos] + " cur: " + cur.to_s + "\n"
           next
         end
         
@@ -63,18 +68,15 @@ class String
           if v.include?(r[pos])
             if r[pos] == syllable[0] || d.include?(r[pos] + syllable ) # doubel vowel or diphtong
               syllable = r[pos] + syllable
-            #              print "debug: syllable = " + syllable + " pos = " + r[pos] + " cur: " + cur.to_s + "\n"                                
             else
               # vowels do not form diphtong
               syllables.push(syllable)
               cur = :vowel
               syllable = r[pos]
-              #              print "debug: syllable = " + syllable + " pos = " + r[pos] + " cur: " + cur.to_s + "\n"              
               next
             end
           else # found consonant
             syllable = r[pos] + syllable
-            #            print "debug: syllable = " + syllable + " pos = " + r[pos] + " cur: " + cur.to_s + "\n"            
             syllables.push(syllable)
             syllable = ''
             cur = :none
@@ -83,14 +85,12 @@ class String
         else # cur == :consonant
           if v.include?(r[pos])
             syllable = r[pos] + syllable
-          #            print "debug: syllable = " + syllable + " pos = " + r[pos] + " cur: " + cur.to_s + "\n"            
           else
-            if c.include?(syllable) # two consonants probably syllable continues over vowels 
+            if ! VowelsRE.match(syllable) # several consonants probably syllable continues over vowels 
               syllable = r[pos] + syllable
-            #              print "debug: syllable = " + syllable + " pos = " + r[pos] + " cur: " + cur.to_s + "\n"            
+            
             else
               syllable = r[pos] + syllable
-              #              print "debug: syllable = " + syllable + " pos = " + r[pos] + " cur: " + cur.to_s + "\n"                        
               syllables.push(syllable)
               syllable = ''
               cur = :none
@@ -98,13 +98,26 @@ class String
           end
         end
       }
-      syllables.push(syllable)
+
+      # check if last syllable is only consonants, combine to prev.
+      if ! VowelsRE.match(syllable)
+        prev = syllables.pop
+        if prev.nil?
+          syllables.push(syllable)
+        else
+          syllables.push(syllable + prev)
+        end
+      else
+        syllables.push(syllable)
+      end
+
       while not syllables.empty?
         s=syllables.pop
         next if s.nil? || s.empty?
-        #        print "yielding: " + s + "\n"
         yield(s)
       end
+
+      yield(' ') # to make language detector recognize word barriers.
     }
   end
   
@@ -123,7 +136,10 @@ class String
   
   def syllables
     arr = []
-    each_syllable{|s| arr << s}
+    each_syllable{|s|
+      next if s == ' '
+      arr << s
+    }
     arr
   end
   
@@ -132,4 +148,16 @@ class String
       word.syllables.join('-')
     }.join(' ')
   end
+
+  def nonsense?
+    vre = VowelsRE #Regexp.new('[' + Vowels + ']')
+    each_syllable {|s|
+      next if s == ' '
+      return true unless s.match(vre) # if syllable is only consonants
+    }
+    
+    # do not allow quad consonants or quad vowels
+    scan(Regexp.new(QuadVowels + "|" + QuintConsonants)).size > 0 
+  end
+
 end

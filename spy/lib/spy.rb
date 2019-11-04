@@ -115,6 +115,7 @@ module Spy
     end
     
     def insert(word)
+      #print "insert: " + word + "\n"
       return if word.nil? || word.empty?
 
       node = root
@@ -474,14 +475,19 @@ module Spy
       @start_nodes = {}
       @node_index = {}
       @links = {}
+      @space = Node.new(' ')
     end
 
+    def space
+      @space
+    end
+    
     def train(lang, corpus)
       @languages << lang unless @languages.include?(lang)
       corpus.each_sentence { |s|
+        #      ('_'+s).each_trigram {|trigram|
         prev = nil
         node = nil
-        #      ('_'+s).each_trigram {|trigram|
         s.each_syllable {|trigram|
           @visits = @visits + 1.0
           prev = node
@@ -497,12 +503,12 @@ module Spy
             if node.nil?
               node = Node.new(trigram)
               nodeindex[trigram] = node
-            end
+              end
             node.score(lang)
             @trigramcount = trigramcount + 1.0
-
+            
             if prev.nil?
-              start_nodes[trigram] = node
+                start_nodes[trigram] = node
             else
               prev.connect(lang, node)
               @transitioncount= transitioncount + 1.0
@@ -515,8 +521,15 @@ module Spy
             end
           end
         }
+        # connect space to last syllable of word
+          unless prev.nil?
+            space.score(lang)
+            prev.connect(lang, space)
+            @transitioncount= transitioncount + 1.0
+          end
       }
-      Rails.logger.debug "trigrams: " + trigramcount.to_s + " visits: " + visits.to_s + " transitions: " + transitioncount.to_s + "\n"
+
+      #Rails.logger.debug "trigrams: " + trigramcount.to_s + " visits: " + visits.to_s + " transitions: " + transitioncount.to_s + "\n"
     end
     
     def confidence(text)
@@ -545,10 +558,6 @@ module Spy
         }
       }
 
-      # languages.each{|lang|
-      #   print "weights: " + nc[lang].to_s + " " + lc[lang].to_s + "\n"
-      # }
-      
       languages.inject({}) {|h, lang|
         h[lang]=nc[lang] + lc[lang]
         h
@@ -665,7 +674,7 @@ module Spy
     end
     
     def initialize()
-      @minthreshold=1.0
+      @minthreshold=2.0
     end
 
     def loadall
@@ -709,13 +718,13 @@ module Spy
         hc = trie.hitcount(decrypted)
         Rails.logger.debug "dictionary check: " + hc.to_s + "\n"
 
-        #if hc[:found] == 0
-        #  Rails.logger.debug "dropped sentence, no finnish words found: '" + decrypted + "'\n"
-        #  next
-        #end
+        if hc[:found] == 0
+          Rails.logger.debug "dropped sentence, no finnish words found: '" + decrypted + "'\n"
+          next
+        end
 
         # make brutal check before accepting
-        if nonsense?(decrypted)
+        if decrypted.nonsense?
           Rails.logger.debug "dropped candidate due brutal check: '" + decrypted + "'\n"
           next
         end
@@ -727,8 +736,9 @@ module Spy
         #  print "more likely estonian: '" + decrypted + "'\n"
         #  next
         #end
-
-        if confidences['fi'] < minthreshold
+        
+        c = hc[:found].to_f/hc[:wc].to_f * confidences['fi']
+        if c < minthreshold
           Rails.logger.debug "probably not finnish: '" + decrypted + "'\n"
           if hc[:found].to_f/hc[:wc].to_f > 0.5
             Rails.logger.debug "wierd, high finnish word count while detected as non-finnish\n"
@@ -737,7 +747,7 @@ module Spy
           end
           next
         end
-        
+
         highest=bestconfidence(confidences)
         if bestconfidences.nil? || best < highest
           # found better candidate
@@ -750,22 +760,23 @@ module Spy
           next
         end
 
-        if hc[:found] < 2 && confidences['fi'] < 2.0
-          print "dropped candidate after dictionary lookup: "
-          print hc.to_s + " confidence: " + confidences['fi'].to_s
-          print "'" + decrypted + "'\n"
-          next
-        end
+        # if hc[:found] < 2 # && confidences['fi'] < 1.0
+        #   print "dropped candidate after dictionary lookup: "
+        #   print hc.to_s + " confidence: " + confidences['fi'].to_s
+        #   print "'" + decrypted + "'\n"
+        #   next
+        # end
 
-        mc=detector.confidence(hc[:missed].join(' '))
-        if hc[:found] != hc[:wc] && confidences['fi'] < 1.0 && mc['fi'] < minthreshold
-          Rails.logger.debug "dropped candidate after dictionary lookup: "
-          Rails.logger.debug hc.to_s + " confidence on missed: " + mc['fi'].to_s
-          Rails.logger.debug " confidence on sentence: " + confidences['fi'].to_s
-          Rails.logger.debug " '" + decrypted + "'\n"            
-        else
-          maybefinnish<< {:sentence => decrypted, :confidence => confidences['fi'], :wc => hc[:wc], :found => hc[:found] }
-        end
+        maybefinnish<< {:sentence => decrypted, :confidence => confidences['fi'], :wc => hc[:wc], :found => hc[:found] , :c => c}
+        # mc=detector.confidence(hc[:missed].join(' '))
+        # if hc[:found] != hc[:wc] && confidences['fi'] < 1.0 && mc['fi'] < minthreshold
+        #   Rails.logger.debug "dropped candidate after dictionary lookup: "
+        #   Rails.logger.debug hc.to_s + " confidence on missed: " + mc['fi'].to_s
+        #   Rails.logger.debug " confidence on sentence: " + confidences['fi'].to_s
+        #   Rails.logger.debug " '" + decrypted + "'\n"            
+        # else
+        #   maybefinnish<< {:sentence => decrypted, :confidence => confidences['fi'], :wc => hc[:wc], :found => hc[:found] }
+        # end
       }
       if maybefinnish.length > 0
         { :finnish => true, :sentence => maybefinnish.last }

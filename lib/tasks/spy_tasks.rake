@@ -1,8 +1,6 @@
 namespace :spy do
   desc "Build dictionary file from given sources [path to unzipped FinnWordNet-2.0, path untarred FinnishTreeBank 3.0]."
   task :builddict, [:fwnpath] do |task, args|
-    #task :builddict, [:fwnpath, :ftbpath] do |task, args|
-    #Spy::Agent.instance.build_dictionary(args.fwnpath, args.ftbpath)
     trie = Spy::Trie.new
     index=Spy::FinnWordNetIndex.new(args.fwnpath + '/dict/index.adj')
 
@@ -22,24 +20,27 @@ namespace :spy do
       trie.insert(word)
     }
     
-    # corpus=CONLLXCorpus.new(ftbpath, trie)
+    # corpus=Spy::CONLLXCorpus.new(args.ftbpath, trie)
     # corpus.each_token {|t|
-    
+      
     #   if ["Num", "Punct", "Interj", "Abbr"].include?(t[:cpostag]) || t[:head] == 'Abbr'
     #     next
     #   end
-    
+
+    #   if t[:form].nonsense?
+    #     print "skip: " + t[:form] + "\n"
+    #     next
+    #   end
+      
     #   trie.insert(t[:form])
     #   trie.insert(t[:lemma])
     # }
-    
+
     trie.save(Spy::DictionaryFile)
-    
   end
   
   desc "Build language detector model."
   task :buildmodel, [:ficorpuspath] do |task, args|
-    #Spy::Agent.instance.build_model(args.ficorpuspath)
     detector=Spy::LanguageDetector.new
     detector.train('fi', Spy::OneLinerCorpus.new(args.ficorpuspath))
     #detector.train('et', OneLinerCorpus.new(etcorpuspath))
