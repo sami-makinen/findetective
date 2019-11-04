@@ -559,7 +559,7 @@ module Spy
       }
 
       languages.inject({}) {|h, lang|
-        h[lang]=nc[lang] + lc[lang]
+        h[lang]=(nc[lang] + lc[lang])
         h
       }
     end

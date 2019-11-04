@@ -8,16 +8,20 @@ Install Ruby (2.5.5) and Rails (6.0.0).
 
 To get see result on web browser:
 
+```ruby
 $ cd findetective
 $ rails server
+```
 
 Go to 'http://localhost:3000/spy/index' to see result.
 
 From console
 
+```ruby
 $ rails console
 > Spy::Agent.instance.loadall
 > Spy::Agent.instance.run
+```
 
 See also README under spy/ -directory.
 
